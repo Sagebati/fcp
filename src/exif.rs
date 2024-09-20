@@ -3,8 +3,10 @@ use std::time::SystemTime;
 use bytes::{Buf, Bytes};
 use chrono::{DateTime, Datelike, FixedOffset, Timelike};
 use nom_exif::{Exif, ExifIter, ExifTag, MediaParser, MediaSource};
+use serde::Serialize;
 use time::convert::Minute;
 
+#[derive(Serialize)]
 pub struct PhotoMeta {
     pub year: i32,
     pub month: u32,
