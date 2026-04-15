@@ -1,1 +1,6 @@
 /target
+/models/
+/test/
+diff.txt
+trace.json
+.idea/
