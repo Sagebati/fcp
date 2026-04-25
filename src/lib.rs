@@ -1,7 +1,11 @@
-mod exif;
 pub mod clip;
+mod exif;
+mod error;
 
-pub use crate::clip::{init_gpu, load_image_for_clip, ClipTagger, ClipTaggerManager, ClipTaggerPool};
+pub use crate::clip::{
+    load_image_for_clip, ClipError, ClipTagger, ClipTaggerManager, ClipTaggerPool,
+};
+use bon::bon;
 
 use crate::exif::PhotoMeta;
 use anyhow::{anyhow, Context};
@@ -10,14 +14,20 @@ use clap::Parser;
 use derive_more::with_trait::{From, Unwrap};
 use derive_more::Display;
 use ecow::EcoString;
+use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use jiff::civil::DateTime;
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
 use std::fs::File;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::OnceCell;
-use tracing::{debug, info, instrument, warn};
+use tokio::task::spawn_blocking;
+use tracing::{debug, info, info_span, instrument, warn, Span};
+use tracing_indicatif::span_ext::IndicatifSpanExt;
 use walkdir::DirEntry;
 
 pub type PhotoHash = [u8; 32];
@@ -26,6 +36,25 @@ pub type Res<T = ()> = anyhow::Result<T>;
 
 pub type MetaNotLoaded = ();
 pub type MetaLoaded = PhotoMeta;
+
+#[derive(bon::Builder)]
+pub struct LoadLibrary {
+    path: PathBuf,
+
+    autotagging: bool,
+
+    #[builder(default = std::thread::available_parallelism()
+        .unwrap_or_else(|_| 1.try_into().unwrap()).into())]
+    cpu_parallelism: usize,
+    io_parallelism: usize,
+}
+
+pub struct Library {}
+
+#[instrument(skip_all)]
+pub fn load_library(load_library: &LoadLibrary) -> Library {
+    Library {}
+}
 
 #[derive(Debug)]
 pub struct Photo<Meta = MetaLoaded> {
@@ -186,15 +215,13 @@ pub struct Configuration {
         help = "The number of copies at the same time will limit"
     )]
     pub concurrency_limit: usize,
-
 }
 
 #[instrument(skip(conf))]
 pub fn scan_library_paths(conf: &Configuration) -> impl Iterator<Item = PathBuf> + '_ {
     #[instrument(skip(image_extensions))]
-    fn filter_file(image_extensions: &BTreeSet<EcoString> ,file: &DirEntry) -> Option<PathBuf> {
+    fn filter_file(image_extensions: &BTreeSet<EcoString>, file: &DirEntry) -> Option<PathBuf> {
         let file_path = file.path();
-
 
         let ext = file_path.extension()?;
         let ext = ext
@@ -212,17 +239,15 @@ pub fn scan_library_paths(conf: &Configuration) -> impl Iterator<Item = PathBuf>
         }
     }
 
-    let filter: Box<dyn Fn(&DirEntry) -> Option<PathBuf> >=  {
+    let filter: Box<dyn Fn(&DirEntry) -> Option<PathBuf>> = {
         let image_extensions = conf
             .image_extensions
-            .iter().cloned()
+            .iter()
+            .cloned()
             .collect::<BTreeSet<_>>();
 
-        Box::new(
-       move |file| filter_file(&image_extensions, file)
-        )
+        Box::new(move |file| filter_file(&image_extensions, file))
     };
-
 
     let walker = {
         let root_path = conf.from.as_path();
@@ -312,4 +337,137 @@ pub async fn copy(
 #[derive(Display)]
 pub enum FileIgnoredReason {
     FileAlreadyExists,
+}
+
+pub fn stage_scan(config: Arc<Configuration>, progress: Span) -> UnboundedReceiver<PathBuf> {
+    let (tx, rx) = unbounded();
+    let scan_span = info_span!("scan", root = ?config.from);
+    spawn_blocking(move || {
+        let _enter = scan_span.enter();
+        let mut count = 0u64;
+        for (i, path) in scan_library_paths(&config).enumerate() {
+            if tx.unbounded_send(path).is_err() {
+                break;
+            }
+            count = i as u64;
+            if i % 10 == 0 {
+                progress.pb_set_length(count);
+            }
+        }
+        progress.pb_set_length(count + 1);
+    });
+    rx
+}
+
+#[instrument(skip_all, fields(file = ?path.file_name()))]
+pub async fn stage_load_meta(path: PathBuf) -> Res<Photo> {
+    Photo::new(path).load_meta().await
+}
+
+#[instrument(skip_all)]
+fn stage_route(
+    result: Res<Photo>,
+    config: Arc<Configuration>,
+) -> impl Future<Output = Option<(Photo, PathBuf)>> {
+    async move {
+        match result {
+            Ok(photo) => {
+                let new_path = compute_new_path(&config.dest, &config.path_format, &photo);
+                if !new_path.exists() || config.force {
+                    Some((photo, new_path))
+                } else {
+                    debug!(
+                        file_path = ?photo.original_path(),
+                        ignored = true,
+                        reason = %FileIgnoredReason::FileAlreadyExists,
+                    );
+                    None
+                }
+            }
+            Err(e) => {
+                warn!("{e:?}");
+                None
+            }
+        }
+    }
+}
+
+#[instrument(skip_all, fields(batch_size = batch.len()))]
+async fn stage_tag_batch(
+    batch: &[Photo],
+    tags: &[String],
+    pool: &ClipTaggerPool,
+) -> Vec<Vec<String>> {
+    // Load bytes for all photos concurrently.
+    let bytes_per_photo: Vec<Option<Bytes>> =
+        futures::future::join_all(batch.iter().map(|photo| photo.bytes()))
+            .await
+            .into_iter()
+            .map(|r| {
+                r.map(|b| b.clone())
+                    .map_err(|e| {
+                        warn!("Failed to load bytes: {e:?}");
+                        e
+                    })
+                    .ok()
+            })
+            .collect();
+
+    let mut tagger = match pool.get().await {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("Failed to acquire tagger from pool: {e:?}");
+            todo!()
+        }
+    };
+
+    let span = tracing::Span::current();
+    let result = spawn_blocking( move || {
+        let _enter = span.enter();
+        // Decode images in parallel using rayon.
+        let decoded: Vec<(usize, image::DynamicImage)> = bytes_per_photo
+            .into_par_iter()
+            .enumerate()
+            .filter_map(|(i, maybe)| {
+                let b = maybe?;
+                load_image_for_clip(&b[..]).ok().map(|img| (i, img))
+            })
+            .collect();
+
+        if decoded.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let indices: Vec<usize> = decoded.iter().map(|(i, _)| *i).collect();
+        let images: Vec<image::DynamicImage> = decoded.into_iter().map(|(_, img)| img).collect();
+
+        let tag_results = tagger.predict_batch(&images, &tags, 0.2)?;
+
+        Ok::<Vec<(usize, Vec<String>)>, anyhow::Error>(
+            indices.into_iter().zip(tag_results).collect(),
+        )
+    })
+    .await;
+
+    match result {
+        Ok(Ok(tagged)) => {
+            for (idx, tags) in &tagged {
+                todo!()
+            }
+        }
+        Ok(Err(e)) => warn!("Batch tagging failed: {e:?}"),
+        Err(e) => warn!("Batch tagger task panicked: {e:?}"),
+    }
+
+    todo!()
+}
+
+#[instrument(skip_all, fields(file = ?photo.original_path().file_name()))]
+pub async fn stage_copy(photo: Photo, new_path: PathBuf, config: Arc<Configuration>) -> Res<()> {
+    copy(photo.original_path(), &new_path, &config)
+        .await
+        .context(format!(
+            "Error occurred when copying {:?}",
+            photo.original_path()
+        ))
 }

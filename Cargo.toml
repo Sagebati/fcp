@@ -13,15 +13,16 @@ embed-models = ["dep:rust-embed"]
 
 [dependencies]
 anyhow = "1"
-deadpool = { version = "0.13.0", features = ["managed"] }
 blake3 = { version = "1", features = ["rayon"] }
 bon = "3"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 console-subscriber = { version = "0.5.0", features = ["parking_lot"], optional = true }
+deadpool = { version = "0.13.0", features = ["managed"] }
 derive_more = { version = "2", features = ["display", "from", "unwrap"] }
 ecow = "0.2.5"
 enclose = "1"
+figment = "0.10.19"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 # gpui = "0.2"
 hf-hub = { version = "0.5.0", features = ["rustls-tls", "ureq"], default-features = false }
@@ -35,10 +36,11 @@ rayon = "1"
 rexiv2 = "0.10"
 rust-embed = { version = "8", features = ["compression"], optional = true }
 serde = { version = "1", features = ["derive"] }
+thiserror = "2.0.18"
 tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
 tokio = { version = "1", features = ["rt-multi-thread", "fs", "sync", "io-uring"] }
 tracing = "0.1.40"
+tracing-chrome = { version = "0.7" }
 tracing-indicatif = "0.3.9"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-chrome = { version = "0.7", optional = true }
 walkdir = "2"
