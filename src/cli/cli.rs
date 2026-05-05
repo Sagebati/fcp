@@ -19,7 +19,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-static DEFAULT_DEST: &str = "{{year}}/{{year}}_{{month}}_{{day}}/{{original}}";
+static DEFAULT_DEST: &str = "{{year}}/{{year}}-{{month}}-{{day}}/{{month}}/{{original}}";
 
 #[derive(Display, Clone, Debug)]
 #[display("{}", _0.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","))]
@@ -39,8 +39,8 @@ fn ext_default() -> ImageExtension {
     ImageExtension(vec![
         EcoString::from("raf"),
         EcoString::from("RAF"),
-        //EcoString::from("jpg"),
-        //EcoString::from("JPG"),
+        EcoString::from("jpg"),
+        EcoString::from("JPG"),
         EcoString::from("NEF"),
         EcoString::from("nef"),
     ])
