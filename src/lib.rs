@@ -47,13 +47,6 @@ pub struct LoadLibrary {
     io_parallelism: usize,
 }
 
-pub struct Library {}
-
-#[instrument(skip_all)]
-pub fn load_library(load_library: &LoadLibrary) -> Library {
-    Library {}
-}
-
 #[derive(Debug)]
 pub struct Photo<Meta = MetaLoaded> {
     original_path: PathBuf,
