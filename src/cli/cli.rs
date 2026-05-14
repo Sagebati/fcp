@@ -33,14 +33,13 @@ impl FromStr for ImageExtension {
 }
 
 fn ext_default() -> ImageExtension {
-    ImageExtension(vec![
-        EcoString::from("raf"),
-        EcoString::from("RAF"),
-        EcoString::from("jpg"),
-        EcoString::from("JPG"),
-        EcoString::from("NEF"),
-        EcoString::from("nef"),
-    ])
+    ImageExtension(
+        fcp::extensions::DEFAULT_PHOTO_EXTENSIONS
+            .iter()
+            .copied()
+            .map(EcoString::from)
+            .collect(),
+    )
 }
 
 fn available_parallelism() -> usize {

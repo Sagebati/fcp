@@ -1,6 +1,7 @@
 mod error;
 mod exif;
 pub mod index;
+pub mod extensions;
 
 pub use crate::index::{DbEntry, DedupIndex, Fingerprint};
 
