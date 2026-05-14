@@ -18,7 +18,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-static DEFAULT_DEST: &str = "{{year}}/{{year}}-{{month}}-{{day}}/{{month}}/{{original}}";
+static DEFAULT_DEST: &str = "{{year}}/{{year}}-{{month}}-{{day}}/{{month}}/{{original_lc_ext}}";
 
 #[derive(Display, Clone, Debug)]
 #[display("{}", _0.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","))]
