@@ -1,22 +1,16 @@
-pub mod clip;
 mod error;
 mod exif;
 pub mod index;
 
-pub use crate::clip::{
-    load_image_for_clip, ClipError, ClipTagger, ClipTaggerManager, ClipTaggerPool,
-};
 pub use crate::index::{DbEntry, DedupIndex, Fingerprint};
 
 use crate::exif::PhotoMeta;
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use bytes::Bytes;
 use derive_more::with_trait::{From, Unwrap};
 use derive_more::Display;
 use ecow::EcoString;
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
-use jiff::civil::DateTime;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
 use std::fs::File;
@@ -37,29 +31,11 @@ pub type Res<T = ()> = anyhow::Result<T>;
 pub type MetaNotLoaded = ();
 pub type MetaLoaded = PhotoMeta;
 
-#[derive(bon::Builder)]
-pub struct LoadLibrary {
-    path: PathBuf,
-
-    autotagging: bool,
-
-    #[builder(default = std::thread::available_parallelism()
-        .unwrap_or_else(|_| 1.try_into().unwrap()).into())]
-    cpu_parallelism: usize,
-    io_parallelism: usize,
-}
-
 #[derive(Debug)]
 pub struct Photo<Meta = MetaLoaded> {
     original_path: PathBuf,
     meta: Meta,
     bytes: tokio::sync::OnceCell<Bytes>,
-}
-
-pub struct PhotoCalculated {
-    pub tags: Vec<EcoString>,
-    pub people: Vec<EcoString>,
-    pub destination_path: PathBuf,
 }
 
 impl Photo<MetaNotLoaded> {
@@ -73,26 +49,9 @@ impl Photo<MetaNotLoaded> {
     #[tracing::instrument(skip_all, fields(path = ?self.original_path.file_name()))]
     pub async fn load_meta(self) -> Res<Photo> {
         let meta = if let Some(b) = self.bytes.get() {
-            rexiv2::Metadata::new_from_buffer(b)
+            crate::exif::parse_exif_from_bytes(b.clone()).await?
         } else {
-            rexiv2::Metadata::new_from_path(&self.original_path)
-        }
-        .context("Unable to load metadata with rexiv2")?;
-
-        let date = meta
-            .get_tag_string("Exif.Photo.DateTimeOriginal")
-            .or_else(|_| meta.get_tag_string("Exif.Image.DateTime"))
-            .map_err(|e| anyhow!("date not found: {}", e))?;
-
-        static FORMAT: &str = "%Y:%m:%d %H:%M:%S";
-
-        let date = DateTime::strptime(FORMAT, date)?;
-        let meta = PhotoMeta {
-            year: date.year() as i16,
-            month: date.month() as i8,
-            day: date.day() as i8,
-            minutes: date.minute() as i8,
-            seconds: date.second() as i8,
+            crate::exif::parse_exif_from_path(&self.original_path).await?
         };
 
         Ok(Photo {
@@ -476,74 +435,6 @@ pub fn stage_route(
             None
         }
     }
-}
-
-#[instrument(skip_all, fields(batch_size = batch.len()))]
-pub async fn stage_tag_batch(
-    batch: Vec<(Photo, PathBuf)>,
-    tags: Arc<[String]>,
-    pool: ClipTaggerPool,
-) -> Vec<(Photo, PathBuf)> {
-    let bytes_per_photo: Vec<Option<Bytes>> =
-        futures::future::join_all(batch.iter().map(|(photo, _)| photo.bytes()))
-            .await
-            .into_iter()
-            .map(|r| {
-                r.map(|b| b.clone())
-                    .map_err(|e| warn!("Failed to load bytes: {e:?}"))
-                    .ok()
-            })
-            .collect();
-
-    let mut tagger = match pool.get().await {
-        Ok(t) => t,
-        Err(e) => {
-            warn!("Failed to acquire tagger from pool: {e:?}");
-            return batch;
-        }
-    };
-
-    let span = tracing::Span::current();
-    let tags_for_inference = Arc::clone(&tags);
-    let result = spawn_blocking(move || {
-        let _enter = span.enter();
-        let decoded: Vec<(usize, image::DynamicImage)> = bytes_per_photo
-            .into_par_iter()
-            .enumerate()
-            .filter_map(|(i, maybe)| {
-                let b = maybe?;
-                load_image_for_clip(&b[..]).ok().map(|img| (i, img))
-            })
-            .collect();
-
-        if decoded.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let indices: Vec<usize> = decoded.iter().map(|(i, _)| *i).collect();
-        let images: Vec<image::DynamicImage> = decoded.into_iter().map(|(_, img)| img).collect();
-
-        let tag_results = tagger.predict_batch(&images, &tags_for_inference, 0.2)?;
-
-        Ok::<Vec<(usize, Vec<String>)>, anyhow::Error>(
-            indices.into_iter().zip(tag_results).collect(),
-        )
-    })
-    .await;
-
-    match result {
-        Ok(Ok(tagged)) => {
-            for (idx, matched) in tagged {
-                if let Some((photo, _)) = batch.get(idx) {
-                    info!(file = ?photo.original_path().file_name(), tags = ?matched);
-                }
-            }
-        }
-        Ok(Err(e)) => warn!("Batch tagging failed: {e:?}"),
-        Err(e) => warn!("Batch tagger task panicked: {e:?}"),
-    }
-
-    batch
 }
 
 #[instrument(skip_all, fields(file = ?photo.original_path().file_name()))]

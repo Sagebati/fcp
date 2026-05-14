@@ -9,17 +9,15 @@ path = "src/cli/cli.rs"
 
 [features]
 debug = ["dep:console-subscriber", "tokio/tracing"]
-embed-models = ["dep:rust-embed"]
 
 [dependencies]
 anyhow = "1"
 blake3 = { version = "1", features = ["rayon"] }
-bon = "3"
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 clap = { version = "4", features = ["derive"] }
 console-subscriber = { version = "0.5.0", features = ["parking_lot"], optional = true }
 csv = "1"
-deadpool = { version = "0.13.0", features = ["managed"] }
 derive_more = { version = "2", features = ["display", "from", "unwrap", "from_str"] }
 dirs = "6"
 ecow = { version = "0.2.5", features = ["serde"] }
@@ -27,21 +25,12 @@ enclose = "1"
 figment = { version = "0.10.19", features = ["toml", "env"] }
 memmap2 = "0.9"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
-# gpui = "0.2"
-hf-hub = { version = "0.5.0", features = ["rustls-tls", "ureq"], default-features = false }
-image = "0.25.6"
 indicatif = "0.18.0"
-jiff = "0.2.12"
-ndarray = "0.17"
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls", "rocm"] }
+nom-exif = { version = "3", features = ["tokio"] }
 pumps = "0.1.1"
-rayon = "1"
-rexiv2 = "0.10"
 rkyv = "0.8"
-rust-embed = { version = "8", features = ["compression"], optional = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2.0.18"
-tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
 tokio = { version = "1", features = ["rt-multi-thread", "fs", "sync", "io-uring"] }
 tracing = "0.1.40"
 tracing-chrome = { version = "0.7" }
