@@ -38,6 +38,11 @@ tracing-indicatif = "0.3.9"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 walkdir = "2"
 
+[dev-dependencies]
+flate2 = "1"
+tar = "0.4"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
 [profile.release]
 codegen-units = 1
 lto = "fat"
