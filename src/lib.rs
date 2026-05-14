@@ -112,8 +112,6 @@ pub fn compute_new_path(folder: &Path, conf: &str, photo: &Photo) -> PathBuf {
 
 pub type Index = HashMap<PhotoHash, String>;
 
-
-
 /// Pipeline-side runtime configuration. Plain data — no serde, no clap.
 /// The CLI binary owns the user-facing config plumbing and constructs this.
 #[derive(Debug, Clone)]
@@ -189,7 +187,11 @@ pub fn start_reporter(path: PathBuf) -> Res<(Arc<Reporter>, ReporterTask)> {
                 "copy_error" => summary.copy_error += 1,
                 _ => {}
             }
-            let dest = row.dest.as_ref().map(|p| p.to_string_lossy()).unwrap_or_default();
+            let dest = row
+                .dest
+                .as_ref()
+                .map(|p| p.to_string_lossy())
+                .unwrap_or_default();
             writer.write_record([
                 row.outcome,
                 row.src.to_string_lossy().as_ref(),
@@ -226,7 +228,10 @@ pub fn scan_library_paths(conf: &CopyParams) -> impl Iterator<Item = PathBuf> + 
             .ok()?;
 
         if ignore_extensions.contains(ext) {
-            debug!("file ignored because extension is in ignore list {:?}", file_path);
+            debug!(
+                "file ignored because extension is in ignore list {:?}",
+                file_path
+            );
             return None;
         }
 

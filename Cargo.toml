@@ -23,7 +23,6 @@ dirs = "6"
 ecow = { version = "0.2.5", features = ["serde"] }
 enclose = "1"
 figment = { version = "0.10.19", features = ["toml", "env"] }
-memmap2 = "0.9"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 indicatif = "0.18.0"
 nom-exif = { version = "3", features = ["tokio"] }
@@ -37,3 +36,7 @@ tracing-chrome = { version = "0.7" }
 tracing-indicatif = "0.3.9"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 walkdir = "2"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
