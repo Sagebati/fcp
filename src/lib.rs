@@ -98,14 +98,25 @@ pub fn hash_photo_file(path: &Path) -> Res<PhotoHash> {
 }
 
 pub fn compute_new_path(folder: &Path, conf: &str, photo: &Photo) -> PathBuf {
+    let original = photo.original_path.file_name().unwrap().to_str().unwrap();
+    let original_lc_ext = match photo.original_path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => {
+            let stem = photo
+                .original_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(original);
+            format!("{stem}.{}", ext.to_lowercase())
+        }
+        None => original.to_string(),
+    };
+
     let path_string = conf
         .replace("{{year}}", &photo.meta.year.to_string())
         .replace("{{month}}", &photo.meta.month.to_string())
         .replace("{{day}}", &photo.meta.day.to_string())
-        .replace(
-            "{{original}}",
-            photo.original_path.file_name().unwrap().to_str().unwrap(),
-        );
+        .replace("{{original_lc_ext}}", &original_lc_ext)
+        .replace("{{original}}", original);
 
     folder.join(&path_string)
 }
