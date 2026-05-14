@@ -5,4 +5,8 @@ enabled = true
 
 [autotagging]
 enabled = true
-tags = []
+tags = [
+    "landscape",
+    "portrait",
+    "animal",
+]

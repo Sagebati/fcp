@@ -32,7 +32,10 @@ pub enum ClipError {
 
 fn init_gpu() -> anyhow::Result<()> {
     let ok = ort::init()
-        .with_execution_providers([ort::ep::ROCm::default().build()])
+        .with_execution_providers([
+            ort::ep::ROCm::default().build(),
+            ort::ep::CPU::default().build(),
+        ])
         .commit();
     anyhow::ensure!(
         ok,
@@ -248,13 +251,14 @@ impl ClipTagger {
 
         let batch_size = images.len();
 
-        // 1. Preprocess all images and stack into [batch, 3, 224, 224]
-        let preprocessed: Vec<ndarray::Array3<f32>> = images
+        // 1. Preprocess all images into a flat [batch * 3 * 224 * 224] f32 buffer
+        let pixel_data: Vec<f32> = images
             .par_iter()
-            .map(|img| self.preprocess_image(img))
+            .flat_map_iter(|img| self.preprocess_image(img).into_iter())
             .collect();
 
-        let preprocessed = Array4::from_shape_vec((batch_size, 3, 244, 244), preprocessed).unwrap();
+        let preprocessed = Array4::from_shape_vec((batch_size, 3, 224, 224), pixel_data)
+            .expect("BUG: pixel buffer length is batch * 3 * 224 * 224");
 
         let pixel_tensor =
             Tensor::from_array(preprocessed).expect("BUG: pixel_values shape is statically known");
@@ -312,7 +316,7 @@ impl ClipTagger {
         )
         .expect("BUG: text_embeds shape must match extracted dimensions");
 
-        // 4. Normalise both embedding matrices
+        // 4. Normalize both embedding matrices
         let img_norms = image_embeds.map_axis(Axis(1), |row| row.dot(&row).sqrt() + 1e-6);
         let image_norm = &image_embeds / &img_norms.insert_axis(Axis(1));
 
@@ -322,7 +326,7 @@ impl ClipTagger {
         // 5. Similarity matrix [batch, num_tags] = image_norm @ text_norm.T
         let similarities = image_norm.dot(&text_norm.t());
 
-        // 6. For each image collect tags above threshold
+        // 6. For each image collect tags above a threshold
         Ok(similarities
             .outer_iter()
             .map(|row| {
@@ -368,7 +372,7 @@ impl ClipTagger {
         let y_offset = (target_height - h) / 2;
         image::imageops::overlay(
             &mut canvas,
-            &resized.to_rgb8(),
+            &resized.into_rgb8(),
             x_offset.into(),
             y_offset.into(),
         );
@@ -376,9 +380,10 @@ impl ClipTagger {
         // [H, W, 3] → f32 → [3, H, W]
         let array = ndarray::Array3::from_shape_vec(
             (target_height as usize, target_width as usize, 3),
-            canvas.as_raw().clone(),
+            canvas.into_raw(),
         )
         .expect("BUG: canvas is 224x224 RGB8 — shape is deterministic");
+
         let array = array.mapv(|x| x as f32 / 255.0);
         let array = array.permuted_axes([2, 0, 1]); // [3, 224, 224]
 
