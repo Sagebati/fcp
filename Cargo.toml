@@ -21,9 +21,11 @@ console-subscriber = { version = "0.5.0", features = ["parking_lot"], optional =
 csv = "1"
 deadpool = { version = "0.13.0", features = ["managed"] }
 derive_more = { version = "2", features = ["display", "from", "unwrap", "from_str"] }
+dirs = "6"
 ecow = { version = "0.2.5", features = ["serde"] }
 enclose = "1"
 figment = { version = "0.10.19", features = ["toml", "env"] }
+memmap2 = "0.9"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 # gpui = "0.2"
 hf-hub = { version = "0.5.0", features = ["rustls-tls", "ureq"], default-features = false }
@@ -35,6 +37,7 @@ ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "n
 pumps = "0.1.1"
 rayon = "1"
 rexiv2 = "0.10"
+rkyv = "0.8"
 rust-embed = { version = "8", features = ["compression"], optional = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2.0.18"

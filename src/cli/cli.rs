@@ -1,8 +1,8 @@
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use ecow::EcoString;
 use enclose::enclose;
-use fcp::{stage_route, CopyParams, Res};
+use fcp::{stage_dedup, stage_route, CopyParams, DedupIndex, Res};
 use indicatif::ProgressStyle;
 use pumps::{Concurrency, Pipeline};
 use std::convert::Infallible;
@@ -78,6 +78,15 @@ pub struct Args {
     /// Override the path for the per-file CSV report. Defaults to a file in the system temp dir.
     #[arg(long, value_name = "PATH")]
     pub report: Option<PathBuf>,
+    /// Increase log verbosity. -v = debug, -vv = trace. Overridden by RUST_LOG if set.
+    #[arg(short, long, action = ArgAction::Count)]
+    pub verbose: u8,
+    /// Disable the dedup index entirely (every source file is treated as fresh)
+    #[arg(long)]
+    pub no_index: bool,
+    /// Override the dedup index path (default: ~/.cache/fcp/index.rkyv)
+    #[arg(long, value_name = "PATH")]
+    pub index_path: Option<PathBuf>,
 }
 
 impl From<Args> for CopyParams {
@@ -107,8 +116,13 @@ fn main() -> Res {
 async fn async_main() -> Res {
     let cli_args = Args::parse();
 
+    let default_level = match cli_args.verbose {
+        0 => LevelFilter::INFO,
+        1 => LevelFilter::DEBUG,
+        _ => LevelFilter::TRACE,
+    };
     let env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
+        .with_default_directive(default_level.into())
         .from_env_lossy();
 
     let indicative_layer = IndicatifLayer::new();
@@ -136,9 +150,24 @@ async fn async_main() -> Res {
         std::env::temp_dir().join(format!("fcp-report-{ts}.csv"))
     });
 
+    let no_index = cli_args.no_index;
+    let dry = cli_args.dry;
+    let index_path = cli_args.index_path.clone().unwrap_or_else(|| {
+        dirs::cache_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("fcp")
+            .join("index.rkyv")
+    });
+
     let configuration: Arc<fcp::CopyParams> = Arc::new(cli_args.into());
 
     reg.init();
+
+    let index = if no_index || dry {
+        DedupIndex::disabled()
+    } else {
+        DedupIndex::open(index_path.clone())?
+    };
 
     let (reporter, reporter_task) = fcp::start_reporter(report_path)?;
 
@@ -154,6 +183,10 @@ async fn async_main() -> Res {
         global_span.clone(),
     ))
     .filter_map(
+        enclose!((index, reporter) move |path| stage_dedup(path, Arc::clone(&index), Arc::clone(&reporter))),
+        Concurrency::concurrent_ordered(io_parallelism),
+    )
+    .filter_map(
         enclose!((reporter) move |path| fcp::stage_load_meta(path, Arc::clone(&reporter))),
         Concurrency::concurrent_ordered(io_parallelism),
     )
@@ -164,8 +197,8 @@ async fn async_main() -> Res {
         Concurrency::concurrent_ordered(io_parallelism),
     )
     .map(
-        enclose!((configuration, reporter)
-            move |(photo, new_path)| fcp::stage_copy(photo, new_path, Arc::clone(&configuration), Arc::clone(&reporter))
+        enclose!((configuration, reporter, index)
+            move |(photo, new_path)| fcp::stage_copy(photo, new_path, Arc::clone(&configuration), Arc::clone(&reporter), Arc::clone(&index))
         ),
         Concurrency::concurrent_ordered(io_parallelism),
     )
@@ -181,15 +214,30 @@ async fn async_main() -> Res {
 
     drop(reporter);
     let summary = reporter_task.join.await??;
+
+    let index_total = match index.save() {
+        Ok(n) => Some(n),
+        Err(e) => {
+            warn!("couldn't save dedup index: {e:?}");
+            None
+        }
+    };
+
     eprintln!(
-        "{} copied, {} hard-linked, {} dry-run, {} skipped, {} errors — report: {}",
+        "{} copied, {} hard-linked, {} dry-run, {} skipped (dest), {} skipped (dedup), {} errors — report: {}",
         summary.copied,
         summary.hard_linked,
         summary.dry_run,
         summary.skipped,
+        summary.skipped_dedup,
         summary.meta_error + summary.copy_error,
         reporter_task.path.display(),
     );
+    if let Some(n) = index_total {
+        if !no_index && !dry {
+            eprintln!("dedup index: {} entries at {}", n, index_path.display());
+        }
+    }
 
     Ok(())
 }

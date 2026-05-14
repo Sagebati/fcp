@@ -1,10 +1,12 @@
 pub mod clip;
 mod error;
 mod exif;
+pub mod index;
 
 pub use crate::clip::{
     load_image_for_clip, ClipError, ClipTagger, ClipTaggerManager, ClipTaggerPool,
 };
+pub use crate::index::{DbEntry, DedupIndex, Fingerprint};
 
 use crate::exif::PhotoMeta;
 use anyhow::{anyhow, Context};
@@ -182,6 +184,7 @@ pub struct ReportSummary {
     pub hard_linked: u64,
     pub dry_run: u64,
     pub skipped: u64,
+    pub skipped_dedup: u64,
     pub meta_error: u64,
     pub copy_error: u64,
 }
@@ -222,6 +225,7 @@ pub fn start_reporter(path: PathBuf) -> Res<(Arc<Reporter>, ReporterTask)> {
                 "hard_linked" => summary.hard_linked += 1,
                 "dry_run" => summary.dry_run += 1,
                 "skipped" => summary.skipped += 1,
+                "skipped_dedup" => summary.skipped_dedup += 1,
                 "meta_error" => summary.meta_error += 1,
                 "copy_error" => summary.copy_error += 1,
                 _ => {}
@@ -404,6 +408,33 @@ pub fn stage_scan(config: Arc<CopyParams>, progress: Span) -> UnboundedReceiver<
 }
 
 #[instrument(skip_all, fields(file = ?path.file_name()))]
+pub async fn stage_dedup(
+    path: PathBuf,
+    index: Arc<DedupIndex>,
+    reporter: Arc<Reporter>,
+) -> Option<PathBuf> {
+    let fp = match Fingerprint::from_source(&path).await {
+        Ok(f) => f,
+        Err(e) => {
+            warn!("couldn't fingerprint {path:?}: {e:?}");
+            return Some(path);
+        }
+    };
+    if index.contains(&fp) {
+        debug!(file_path = ?path, "skipped: already in dedup index");
+        reporter.record(ReportRow {
+            outcome: "skipped_dedup",
+            src: path,
+            dest: None,
+            error: None,
+        });
+        None
+    } else {
+        Some(path)
+    }
+}
+
+#[instrument(skip_all, fields(file = ?path.file_name()))]
 pub async fn stage_load_meta(path: PathBuf, reporter: Arc<Reporter>) -> Option<Photo> {
     match Photo::new(path.clone()).load_meta().await {
         Ok(p) => Some(p),
@@ -521,6 +552,7 @@ pub async fn stage_copy(
     new_path: PathBuf,
     config: Arc<CopyParams>,
     reporter: Arc<Reporter>,
+    index: Arc<DedupIndex>,
 ) -> Res<()> {
     let src = photo.original_path().to_path_buf();
     let result = copy(photo.original_path(), &new_path, &config).await;
@@ -534,12 +566,19 @@ pub async fn stage_copy(
     };
 
     match &result {
-        Ok(()) => reporter.record(ReportRow {
-            outcome,
-            src: src.clone(),
-            dest: Some(new_path.clone()),
-            error: None,
-        }),
+        Ok(()) => {
+            reporter.record(ReportRow {
+                outcome,
+                src: src.clone(),
+                dest: Some(new_path.clone()),
+                error: None,
+            });
+            if !config.dry {
+                if let Some(entry) = build_db_entry(&src, &new_path).await {
+                    index.record(entry);
+                }
+            }
+        }
         Err(e) => reporter.record(ReportRow {
             outcome: "copy_error",
             src: src.clone(),
@@ -549,4 +588,26 @@ pub async fn stage_copy(
     }
 
     result.with_context(|| format!("Error occurred when copying {src:?}"))
+}
+
+async fn build_db_entry(src: &Path, dst: &Path) -> Option<DbEntry> {
+    let fp = match Fingerprint::from_source(src).await {
+        Ok(f) => f,
+        Err(e) => {
+            warn!("couldn't fingerprint {src:?} for index: {e:?}");
+            return None;
+        }
+    };
+    let imported_at_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0);
+    Some(DbEntry {
+        size: fp.size,
+        mtime_ns: fp.mtime_ns,
+        name: fp.name,
+        src_path: src.to_string_lossy().into_owned(),
+        dst_path: dst.to_string_lossy().into_owned(),
+        imported_at_ns,
+    })
 }
