@@ -86,7 +86,7 @@ impl<T> Photo<T> {
 #[instrument]
 pub fn hash_photo(bytes: &[u8]) -> Res<PhotoHash> {
     let mut hasher = blake3::Hasher::new();
-    hasher.update_rayon(&bytes);
+    hasher.update_rayon(bytes);
     Ok(hasher.finalize().into())
 }
 
@@ -111,6 +111,8 @@ pub fn compute_new_path(folder: &Path, conf: &str, photo: &Photo) -> PathBuf {
 }
 
 pub type Index = HashMap<PhotoHash, String>;
+
+type FileFilter = Box<dyn Fn(&DirEntry) -> Option<PathBuf>>;
 
 /// Pipeline-side runtime configuration. Plain data — no serde, no clap.
 /// The CLI binary owns the user-facing config plumbing and constructs this.
@@ -244,7 +246,7 @@ pub fn scan_library_paths(conf: &CopyParams) -> impl Iterator<Item = PathBuf> + 
         }
     }
 
-    let filter: Box<dyn Fn(&DirEntry) -> Option<PathBuf>> = {
+    let filter: FileFilter = {
         let image_extensions = conf
             .image_extensions
             .iter()

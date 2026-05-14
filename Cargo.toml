@@ -25,6 +25,7 @@ enclose = "1"
 figment = { version = "0.10.19", features = ["toml", "env"] }
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 indicatif = "0.18.0"
+memmap2 = "0.9"
 nom-exif = { version = "3", features = ["tokio"] }
 pumps = "0.1.1"
 rkyv = "0.8"
