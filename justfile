@@ -8,3 +8,8 @@ download-models:
 	@echo "Downloading CLIP tokenizer..."
 	curl -L https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json -o models/clip-vit-base-patch32/tokenizer.json
 	@echo "Download complete."
+
+# Coverage test against exiftool.org sample archives + a few RAW samples.
+# Downloads ~50 MB on first run, caches under target/tmp/.
+test-samples:
+	cargo test --test sample_images -- --ignored --nocapture

@@ -37,3 +37,8 @@ tracing-chrome = { version = "0.7" }
 tracing-indicatif = "0.3.9"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 walkdir = "2"
+
+[dev-dependencies]
+ureq = { version = "2", default-features = false, features = ["tls"] }
+flate2 = "1"
+tar = "0.4"
