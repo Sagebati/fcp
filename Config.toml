@@ -2,11 +2,3 @@ hard_links = false
 
 [facedetection]
 enabled = true
-
-[autotagging]
-enabled = true
-tags = [
-    "landscape",
-    "portrait",
-    "animal",
-]
