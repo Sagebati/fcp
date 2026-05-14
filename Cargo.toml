@@ -23,9 +23,9 @@ dirs = "6"
 ecow = { version = "0.2.5", features = ["serde"] }
 enclose = "1"
 figment = { version = "0.10.19", features = ["toml", "env"] }
-memmap2 = "0.9"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 indicatif = "0.18.0"
+memmap2 = "0.9"
 nom-exif = { version = "3", features = ["tokio"] }
 pumps = "0.1.1"
 rkyv = "0.8"
@@ -39,6 +39,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 walkdir = "2"
 
 [dev-dependencies]
-ureq = { version = "2", default-features = false, features = ["tls"] }
 flate2 = "1"
 tar = "0.4"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
+[profile.release]
+codegen-units = 1
+lto = "fat"

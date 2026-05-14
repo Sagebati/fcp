@@ -1,5 +1,5 @@
-
 use clap::{ArgAction, Parser};
+use derive_more::Display;
 use ecow::EcoString;
 use enclose::enclose;
 use fcp::{stage_dedup, stage_route, CopyParams, DedupIndex, Res};
@@ -9,7 +9,6 @@ use std::convert::Infallible;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use derive_more::Display;
 use tracing::level_filters::LevelFilter;
 use tracing::{info_span, warn};
 use tracing_chrome::ChromeLayerBuilder;
@@ -29,9 +28,7 @@ impl FromStr for ImageExtension {
     type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(ImageExtension(
-            s.split(',').map(EcoString::from).collect(),
-        ))
+        Ok(ImageExtension(s.split(',').map(EcoString::from).collect()))
     }
 }
 
@@ -45,7 +42,6 @@ fn ext_default() -> ImageExtension {
         EcoString::from("nef"),
     ])
 }
-
 
 fn available_parallelism() -> usize {
     std::thread::available_parallelism()
@@ -130,7 +126,12 @@ async fn async_main() -> Res {
     let (chrome_layer, _chrome_guard) = cli_args
         .trace
         .as_deref()
-        .map(|path| ChromeLayerBuilder::new().file(path).include_args(true).build())
+        .map(|path| {
+            ChromeLayerBuilder::new()
+                .file(path)
+                .include_args(true)
+                .build()
+        })
         .unzip();
 
     let reg = tracing_subscriber::registry()

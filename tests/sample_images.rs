@@ -231,7 +231,9 @@ fn ensure_file(url: &str, dest: &Path) -> Result<PathBuf> {
 
 fn download_to(url: &str, dest: &Path) -> Result<()> {
     eprintln!("downloading {url}");
-    let resp = ureq::get(url).timeout(std::time::Duration::from_secs(120)).call();
+    let resp = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(120))
+        .call();
     let resp = match resp {
         Ok(r) => r,
         Err(e) => bail!("ureq GET {url}: {e}"),
@@ -276,10 +278,14 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
 
 fn print_report(stats: &BTreeMap<String, ExtStats>, elapsed: std::time::Duration) {
     let mut rows: Vec<(&String, &ExtStats)> = stats.iter().collect();
-    rows.sort_by(|a, b| b.1.total.cmp(&a.1.total));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.1.total));
 
     println!();
-    println!("## Sample-image parse coverage  ({} extensions, {:?})", rows.len(), elapsed);
+    println!(
+        "## Sample-image parse coverage  ({} extensions, {:?})",
+        rows.len(),
+        elapsed
+    );
     println!();
     println!("| extension | total | parsed | no_date | failed | first error |");
     println!("|-----------|------:|-------:|--------:|-------:|-------------|");
